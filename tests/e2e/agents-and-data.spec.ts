@@ -22,11 +22,15 @@ test("agent proposals, log analysis, content QA and warehouse export", async ({ 
 
   // Data in: Search Console + Mixpanel sync, then a crawl (hreflang, crawl-budget hygiene).
   await page.goto(`/analytics?website=${websiteId}`);
+  await page.waitForLoadState("networkidle"); // a cold dev server can serve the button before it is interactive
   await page.getByRole("button", { name: "Sync now" }).click();
+  await expect(page.getByText(/Analytics sync queued/)).toBeVisible();
   const sync = await waitForTask(page, `/integrations?website=${websiteId}`, "Analytics sync");
   await expect(sync).toContainText("mixpanel");
   await page.goto(`/audits?website=${websiteId}`);
+  await page.waitForLoadState("networkidle"); // a cold dev server can serve the button before it is interactive
   await page.getByRole("button", { name: "Run audit (100 pages)" }).click();
+  await expect(page.getByText(/Site audit queued/)).toBeVisible();
   const auditRow = await waitForTask(page, `/audits?website=${websiteId}`, "Site audit");
   await auditRow.getByRole("link").click();
   await expect(page.getByTestId("audit-issues")).toContainText("hreflang target does not link back");
