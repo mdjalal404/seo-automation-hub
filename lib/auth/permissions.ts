@@ -23,20 +23,28 @@ export type Capability =
   | "jobs.cancel"
   | "jobs.retry"
   | "reports.view"
-  | "audit.view";
+  | "audit.view"
+  | "ai.generate"
+  | "seo.run"
+  | "keywords.manage"
+  | "templates.manage"
+  | "integrations.manage"
+  | "automation.manage";
 
 const MATRIX: Record<Role, readonly Capability[]> = {
   owner: [
     "workspace.manage", "members.manage", "clients.manage", "websites.manage", "connections.manage", "rules.manage",
     "content.create", "content.edit_any", "content.edit_own", "content.validate", "content.approve", "content.publish",
     "content.push_draft", "jobs.cancel", "jobs.retry", "reports.view", "audit.view",
+    "ai.generate", "seo.run", "keywords.manage", "templates.manage", "integrations.manage", "automation.manage",
   ],
   admin: [
     "clients.manage", "websites.manage", "connections.manage", "rules.manage",
     "content.create", "content.edit_any", "content.edit_own", "content.validate", "content.approve", "content.publish",
     "content.push_draft", "jobs.cancel", "jobs.retry", "reports.view", "audit.view",
+    "ai.generate", "seo.run", "keywords.manage", "templates.manage", "integrations.manage", "automation.manage",
   ],
-  member: ["content.create", "content.edit_own", "content.validate", "content.push_draft", "reports.view"],
+  member: ["content.create", "content.edit_own", "content.validate", "content.push_draft", "reports.view", "ai.generate", "seo.run", "keywords.manage", "templates.manage"],
   viewer: ["reports.view"],
 };
 

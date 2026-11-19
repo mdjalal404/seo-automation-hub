@@ -7,11 +7,13 @@ import { parseCredentials } from "@/lib/cms/credentials";
 import { credentialAad, decryptSecret } from "@/lib/security/crypto";
 import { safeFetch } from "@/lib/security/safe-fetch";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { queueIndexNow } from "@/lib/tasks/monitoring";
 
 /** Production wiring for the job processor (worker script, cron route, "process now"). */
 export function createProcessorDeps(label = "worker"): ProcessorDeps {
+  const db = createAdminClient();
   return {
-    repo: createSupabaseJobRepository(createAdminClient()),
+    repo: createSupabaseJobRepository(db),
     http: safeFetch,
     workerId: `${label}:${hostname()}:${randomUUID().slice(0, 8)}`,
     leaseSeconds: 300,
@@ -27,6 +29,9 @@ export function createProcessorDeps(label = "worker"): ProcessorDeps {
         http: safeFetch,
         settings: ctx.website.publishing_settings,
       });
+    },
+    async onPublished(info) {
+      await queueIndexNow(db, { id: info.websiteId, organization_id: info.organizationId }, [info.url], "Published from SEO Automation Hub", `publish:${info.jobId}`);
     },
   };
 }

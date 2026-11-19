@@ -101,6 +101,25 @@ describe("organization isolation", () => {
       expect((await tx.query("select id from cms_connections")).rows).toHaveLength(0);
     });
   });
+
+  it("lists API keys to members without the hash and keeps alerts read-only and tenant-scoped", async () => {
+    await asService(db, (tx) => tx.query("insert into api_keys (organization_id, name, prefix, key_hash) values ($1, 'CI', 'abcdef0123', $2)", [orgA, "a".repeat(64)]));
+    await asService(db, (tx) => tx.query("insert into seo_alerts (organization_id, website_id, source, kind, severity, title, fingerprint) values ($1, $2, 'audit', 'noindex_added', 'critical', 'Page became noindex', 'f1')", [orgA, websiteA]));
+    await asUser(db, ownerA, async (tx) => {
+      expect((await tx.query("select name, prefix from api_keys")).rows).toEqual([{ name: "CI", prefix: "abcdef0123" }]);
+      expect((await tx.query("select title from seo_alerts")).rows).toHaveLength(1);
+    });
+    await expect(asUser(db, ownerA, (tx) => tx.query("select key_hash from api_keys"))).rejects.toThrow(/permission denied/);
+    await expect(asUser(db, ownerA, (tx) => tx.query("update seo_alerts set status = 'resolved'"))).rejects.toThrow(/permission denied/);
+    await asUser(db, ownerB, async (tx) => {
+      expect((await tx.query("select id from api_keys")).rows).toHaveLength(0);
+      expect((await tx.query("select id from seo_alerts")).rows).toHaveLength(0);
+    });
+    // One open alert per fingerprint; a resolved one does not block a new occurrence.
+    await expect(asService(db, (tx) => tx.query("insert into seo_alerts (organization_id, website_id, source, kind, severity, title, fingerprint) values ($1, $2, 'audit', 'noindex_added', 'critical', 'x', 'f1')", [orgA, websiteA]))).rejects.toThrow(/duplicate key/);
+    await asService(db, (tx) => tx.query("update seo_alerts set status = 'resolved' where fingerprint = 'f1'"));
+    await asService(db, (tx) => tx.query("insert into seo_alerts (organization_id, website_id, source, kind, severity, title, fingerprint) values ($1, $2, 'audit', 'noindex_added', 'critical', 'x', 'f1')", [orgA, websiteA]));
+  });
 });
 
 describe("roles", () => {

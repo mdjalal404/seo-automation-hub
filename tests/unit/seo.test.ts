@@ -28,7 +28,8 @@ async function run(content: ContentForCheck, opts: { rules?: unknown; siblings?:
 
 describe("SEO validation engine", () => {
   it("passes a well-formed article", async () => {
-    const { summary, results } = await run(article());
+    // The filler body is not AI-search friendly; that recommendation is covered in seo-automation.test.ts.
+    const { summary, results } = await run(article(), { rules: { checks: { ai_visibility: { enabled: false } } } });
     expect(summary.status).toBe("PASSED");
     expect(results.every((r) => r.checkName && r.status && r.severity && r.message)).toBe(true);
   });

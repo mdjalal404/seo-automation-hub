@@ -1,0 +1,20 @@
+[project]
+name = "seo-toolkit"
+version = "0.1.0"
+description = "Command-line SEO automation helpers that complement SEO Automation Hub: large-log crawl-budget analysis with Googlebot verification, and Search Console opportunity exports from the hub's Postgres."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+db = ["psycopg[binary]>=3.1"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+seo-toolkit = "seo_toolkit.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["seo_toolkit"]

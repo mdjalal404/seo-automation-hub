@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/signup", "/setup", "/auth", "/api/health", "/api/cron"];
+const PUBLIC_PATHS = ["/login", "/signup", "/setup", "/auth", "/api/health", "/api/cron", "/api/v1"]; // /api/v1 authenticates with API keys
 
 /**
  * Refreshes the Supabase session cookie on every request and gates app routes.

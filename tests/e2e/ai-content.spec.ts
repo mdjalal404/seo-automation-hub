@@ -9,6 +9,7 @@ test("AI-written content is shown with its estimated share alongside other warni
   await page.getByRole("button", { name: "Add client" }).first().click();
   await page.getByLabel("Client name").fill("AI Client");
   await page.getByRole("button", { name: "Save client" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden(); // the save must finish before navigating away
   await page.goto("/websites");
   await page.getByRole("button", { name: "Add website" }).first().click();
   await page.getByLabel("Website name").fill("AI Site");

@@ -10,7 +10,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  serverExternalPackages: ["undici"],
+  serverExternalPackages: ["undici", "pdfkit"], // pdfkit reads its font metrics from disk at runtime
   experimental: {
     serverActions: { bodySizeLimit: "4mb" },
   },

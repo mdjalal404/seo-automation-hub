@@ -19,6 +19,7 @@ const NUMERIC: Record<string, { key: string; label: string }[]> = {
   heading_structure: [{ key: "minH2", label: "Min H2" }],
   internal_links: [{ key: "maxLinks", label: "Max links checked" }],
   ai_content: [{ key: "maxAiPercent", label: "Warn at AI %" }],
+  ai_visibility: [{ key: "minScore", label: "Warn below score" }],
 };
 
 export function RulesForm({ websiteId, initial, checks, readOnly, overrideEnabled }: {

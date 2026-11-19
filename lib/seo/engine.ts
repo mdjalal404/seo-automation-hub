@@ -4,6 +4,7 @@ import { internalLinks, urlSyntax } from "@/lib/seo/checks/links";
 import { duplicateSlug, duplicateTitle } from "@/lib/seo/checks/duplicates";
 import { schemaJsonLd } from "@/lib/seo/checks/schema";
 import { aiContent } from "@/lib/seo/checks/ai-content";
+import { aiVisibility } from "@/lib/seo/checks/ai-visibility";
 import { parseHtml, renderBody } from "@/lib/seo/html";
 import type { ResolvedRules } from "@/lib/seo/rules";
 import type { CheckContext, CheckResult, ContentForCheck, SeoCheck, SiblingLookup } from "@/lib/seo/types";
@@ -17,7 +18,7 @@ export function registerCheck(check: SeoCheck) {
 [
   titlePresent, metaDescriptionPresent, titleLength, metaDescriptionLength, slugPresent, h1Policy, headingStructure,
   contentPresent, contentLength, imageAlt, urlSyntax, duplicateSlug, duplicateTitle, internalLinks, schemaJsonLd,
-  canonicalUrl, keywordUsage, aiContent,
+  canonicalUrl, keywordUsage, aiContent, aiVisibility,
 ].forEach(registerCheck);
 
 export function listChecks(): SeoCheck[] {

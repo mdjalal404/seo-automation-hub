@@ -25,6 +25,7 @@ export type ContentRow = {
   status: ContentStatus; validation_status: ValidationStatus; content_hash: string; validated_hash: string | null; approved_hash: string | null;
   scheduled_at: string | null; published_url: string | null; external_post_id: string | null; seo_sync: SeoSyncState;
   assigned_to: string | null; created_by: string | null; approved_by: string | null; approved_at: string | null; created_at: string; updated_at: string;
+  schema_jsonld?: Record<string, unknown> | null; ai_generated?: boolean; brief?: Record<string, unknown> | null; template_id?: string | null; generation_task_id?: string | null;
 };
 export type JobRow = {
   id: string; organization_id: string; website_id: string; content_item_id: string | null; job_type: JobType; status: JobStatus;

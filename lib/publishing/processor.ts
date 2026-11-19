@@ -21,7 +21,19 @@ export type ProcessorDeps = {
   decryptCredentials(ctx: JobContext): CmsCredentials;
   createAdapter(ctx: JobContext, credentials: CmsCredentials): CmsAdapter;
   random?: () => number;
+  /** Called once content is live (e.g. to notify IndexNow). Errors are logged, never fail the job. */
+  onPublished?(info: { organizationId: string; websiteId: string; contentId: string; url: string; jobId: string }): Promise<void>;
 };
+
+async function notifyPublished(ctx: JobContext, deps: ProcessorDeps) {
+  const c = ctx.content;
+  if (!deps.onPublished || !c?.published_url) return;
+  try {
+    await deps.onPublished({ organizationId: ctx.website.organization_id, websiteId: ctx.website.id, contentId: c.id, url: c.published_url, jobId: ctx.job.id });
+  } catch (err) {
+    logger.warn("job.on_published_failed", { jobId: ctx.job.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+}
 
 class LeaseLost extends Error {}
 
@@ -239,6 +251,7 @@ async function verifyPhase(ctx: JobContext, deps: ProcessorDeps) {
 
   if (!ctx.rules.publishing.verifyAfterPublish && ctx.job.job_type === "PUBLISH") {
     await setContent(ctx, deps, { status: "PUBLISHED" });
+    await notifyPublished(ctx, deps);
     return complete(ctx, deps, { verification: "disabled_by_rules" });
   }
 
@@ -262,6 +275,7 @@ async function verifyPhase(ctx: JobContext, deps: ProcessorDeps) {
   if (outcome.passed) {
     await setContent(ctx, deps, { status: "PUBLISHED", seo_sync: newSync });
     metric("verification.passed", 1, {});
+    await notifyPublished(ctx, deps);
     return complete(ctx, deps, { verification: "passed", http_status: outcome.httpStatus });
   }
   if (outcome.transient && ctx.job.attempts < ctx.job.max_attempts) {

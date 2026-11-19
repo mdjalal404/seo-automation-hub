@@ -10,6 +10,9 @@ import { logger } from "../lib/observability/logger";
 import { runWorkerBatch } from "../lib/publishing/processor";
 import { createProcessorDeps } from "../lib/publishing/worker";
 import { configurationProblems } from "../lib/env";
+import { safeFetch } from "../lib/security/safe-fetch";
+import { createAdminClient } from "../lib/supabase/admin";
+import { createTaskDeps, runTaskBatch } from "../lib/tasks/runner";
 
 const once = process.argv.includes("--once");
 const interval = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
@@ -22,6 +25,8 @@ async function main() {
     process.exit(1);
   }
   const deps = createProcessorDeps("worker");
+  // SEO tasks (audits, analytics sync, AI) can run for minutes in the long-lived worker.
+  const taskDeps = createTaskDeps(createAdminClient(), safeFetch, "worker", 15 * 60_000);
   logger.info("worker.started", { workerId: deps.workerId, interval, once });
   for (;;) {
     try {
@@ -29,6 +34,12 @@ async function main() {
       if (r.processed || r.reaped) logger.info("worker.batch", r);
     } catch (err) {
       logger.error("worker.batch_failed", { error: err });
+    }
+    try {
+      const t = await runTaskBatch(taskDeps, { maxTasks: 2, timeBudgetMs: 30 * 60_000 });
+      if (t.processed || t.reaped || t.scheduled) logger.info("worker.task_batch", t);
+    } catch (err) {
+      logger.error("worker.task_batch_failed", { error: err });
     }
     if (once || stopping) break;
     await new Promise((r) => setTimeout(r, interval));

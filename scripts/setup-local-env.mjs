@@ -1,8 +1,8 @@
 // Writes .env.local for local development from `supabase status`.
 // Generates a fresh credential encryption key and cron secret. Never run against production.
 import { execSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const hex = (n) => randomBytes(n).toString("hex");
 // Development-only settings for the local Webflow / Shopify / custom CMS mocks (scripts/mock-cms.ts).
@@ -18,11 +18,38 @@ const multiCmsLines = () => [
   `MOCK_CUSTOM_TOKEN=${randomBytes(24).toString("base64url")}`,
 ];
 
+// Development-only settings for the analytics/SEO API mocks (scripts/mock-analytics.ts) and the AI mock.
+const MOCK_SA_FILE = "dev/.mock-google-service-account.json";
+function ensureMockServiceAccount() {
+  if (existsSync(MOCK_SA_FILE)) return;
+  // A throwaway RSA key used only to sign requests to the local mock Google token endpoint.
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
+  mkdirSync("dev", { recursive: true });
+  writeFileSync(MOCK_SA_FILE, JSON.stringify({ type: "service_account", project_id: "mock-project", private_key_id: hex(8), private_key: privateKey, client_email: "seo-hub@mock-project.iam.gserviceaccount.com" }, null, 2), { mode: 0o600 });
+}
+const seoLines = () => [
+  "# Local analytics/SEO API mocks and AI mock. Ignored when APP_ENV=production.",
+  "ANALYTICS_API_BASE_URL=http://localhost:8791",
+  "MOCK_ANALYTICS_PORT=8791",
+  "MOCK_SITE_PORT=8792",
+  `MOCK_GOOGLE_SERVICE_ACCOUNT_FILE=${MOCK_SA_FILE}`,
+  `MOCK_CLARITY_TOKEN=${randomBytes(32).toString("base64url")}`,
+  "MOCK_DATAFORSEO_LOGIN=mock@example.test",
+  `MOCK_DATAFORSEO_PASSWORD=${hex(12)}`,
+  `MOCK_SIMILARWEB_KEY=${hex(16)}`,
+  "MOCK_MIXPANEL_USERNAME=seo-hub.mock.sa",
+  `MOCK_MIXPANEL_SECRET=${hex(16)}`,
+  `MOCK_DATABRICKS_TOKEN=dapi${hex(16)}`,
+  // Sample AI output for development. Remove this line and set ANTHROPIC_API_KEY for real generation.
+  ...(process.env.ANTHROPIC_API_KEY ? [] : ["LLM_PROVIDER=mock"]),
+];
+
 const force = process.argv.includes("--force");
+ensureMockServiceAccount();
 if (existsSync(".env.local") && !force) {
   // Add settings introduced after the file was generated, keeping existing values.
   const existing = readFileSync(".env.local", "utf8");
-  const missing = multiCmsLines().filter((l) => l.startsWith("#") ? false : !new RegExp(`^${l.split("=")[0]}=`, "m").test(existing));
+  const missing = [...multiCmsLines(), ...seoLines()].filter((l) => l.startsWith("#") ? false : !new RegExp(`^${l.split("=")[0]}=`, "m").test(existing));
   if (missing.length) {
     appendFileSync(".env.local", `\n# Added by setup-local-env.mjs\n${missing.join("\n")}\n`);
     console.log(`Added ${missing.length} new local development settings to .env.local (values generated, not printed).`);
@@ -65,6 +92,7 @@ const lines = [
   `MOCK_WP_APP_PASSWORD=${alnum()}`,
   `DEMO_USER_PASSWORD=${randomBytes(12).toString("base64url")}`,
   ...multiCmsLines(),
+  ...seoLines(),
   "",
 ];
 writeFileSync(".env.local", lines.join("\n"), { mode: 0o600 });

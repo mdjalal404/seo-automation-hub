@@ -4,6 +4,7 @@ import { QaResults } from "@/components/content/qa-results";
 import { SeoSyncTable } from "@/components/content/seo-sync";
 import { WorkflowPanel } from "@/components/content/workflow-panel";
 import { PageHeader } from "@/components/common/page-header";
+import { AiBriefCard, InternalLinksCard, ReadinessCard, SchemaCard } from "@/components/seo/article-tools";
 import { AiShareBadge, ContentStatusBadge, DevTargetBadge, JobStatusBadge, ValidationBadge } from "@/components/common/status-badge";
 import { can, canEditContent } from "@/lib/auth/permissions";
 import { requireWorkspace } from "@/lib/auth/session";
@@ -13,13 +14,14 @@ import { ACTIVE_JOB_STATUSES, JOB_TYPE_LABEL } from "@/lib/jobs/state-machine";
 import { orNotFound } from "@/lib/pages";
 import { isDevelopmentTarget } from "@/lib/security/url";
 import { getContent } from "@/lib/services/content";
+import { articleInsights } from "@/lib/services/seo";
 import { listWebsites } from "@/lib/services/websites";
 
 export default async function ContentPage({ params }: PageProps<"/content/[id]">) {
   const { id } = await params;
   const ctx = await requireWorkspace();
   const { item, website, qa, jobs } = await orNotFound(getContent(ctx, id));
-  const sites = await listWebsites(ctx);
+  const [sites, insights] = await Promise.all([listWebsites(ctx), articleInsights(ctx, id)]);
   const editable = canEditContent(ctx.role, ctx.user.id, item);
   const locked = isLocked(item.status);
   const activePublish = jobs.find((j) => j.job_type === "PUBLISH" && ACTIVE_JOB_STATUSES.includes(j.status));
@@ -32,7 +34,7 @@ export default async function ContentPage({ params }: PageProps<"/content/[id]">
     <>
       <PageHeader
         title={item.title || "Untitled"}
-        description={<span className="flex flex-wrap items-center gap-2"><Link className="hover:underline" href={`/websites/${website.id}`}>{website.clients?.name} — {website.name}</Link><span data-testid="content-status"><ContentStatusBadge status={item.status} /></span><span data-testid="validation-status"><ValidationBadge status={item.validation_status} /></span>{ai ? <span data-testid="ai-badge"><AiShareBadge percent={ai.aiPercent} threshold={ai.threshold ?? 40} /></span> : null}{dev ? <DevTargetBadge /> : null}</span>}
+        description={<span className="flex flex-wrap items-center gap-2"><Link className="hover:underline" href={`/websites/${website.id}`}>{website.clients?.name} — {website.name}</Link><span data-testid="content-status"><ContentStatusBadge status={item.status} /></span><span data-testid="validation-status"><ValidationBadge status={item.validation_status} /></span>{item.ai_generated ? <span className="rounded-md bg-violet-50 px-1.5 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-200">AI draft</span> : null}{ai ? <span data-testid="ai-badge"><AiShareBadge percent={ai.aiPercent} threshold={ai.threshold ?? 40} /></span> : null}{dev ? <DevTargetBadge /> : null}</span>}
       />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section className="rounded-xl border bg-card p-5">
@@ -67,6 +69,7 @@ export default async function ContentPage({ params }: PageProps<"/content/[id]">
               <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Live URL</dt><dd className="truncate">{item.published_url ? <a className="underline" href={item.published_url} target="_blank" rel="noopener noreferrer">{item.published_url}</a> : "—"}</dd></div>
             </dl>
           </div>
+          {item.ai_generated && item.brief ? <AiBriefCard brief={item.brief} /> : null}
           <div className="rounded-xl border bg-card p-4">
             <h2 className="mb-3 text-sm font-semibold">Pre-publish validation</h2>
             <QaResults results={pre} emptyText="Not validated yet." />
@@ -97,6 +100,12 @@ export default async function ContentPage({ params }: PageProps<"/content/[id]">
             ) : <p className="text-sm text-muted-foreground">No jobs yet.</p>}
           </div>
         </aside>
+      </div>
+      <h2 className="mb-3 mt-8 text-base font-semibold">SEO tools</h2>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <ReadinessCard report={insights.readiness} visibility={insights.visibility} websiteId={item.website_id} keyword={item.target_keyword} canCheck={can(ctx.role, "ai.generate")} />
+        <InternalLinksCard contentId={id} links={insights.links} canEdit={editable && !locked} />
+        <SchemaCard contentId={id} saved={item.schema_jsonld ?? null} canEdit={editable} />
       </div>
     </>
   );

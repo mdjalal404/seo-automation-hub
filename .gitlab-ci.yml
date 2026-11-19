@@ -1,0 +1,46 @@
+# CI for SEO Automation Hub: lint, types, unit/integration/DB tests (Node) and the Python toolkit.
+# Browser (Playwright) tests need local Supabase in Docker; run them with `npm run test:e2e` locally
+# or add a Docker-in-Docker job for them.
+stages: [check, test]
+
+default:
+  interruptible: true
+
+.node:
+  image: node:24-bookworm
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/]
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+lint_and_types:
+  extends: .node
+  stage: check
+  script:
+    - npm run lint
+    - npm run typecheck
+
+node_tests:
+  extends: .node
+  stage: test
+  script:
+    - npm test
+  variables:
+    APP_ENV: test
+
+python_toolkit:
+  image: python:3.12-slim
+  stage: test
+  script:
+    - cd python
+    - pip install -q -e ".[dev]"
+    - python -m pytest -q tests
+
+build:
+  extends: .node
+  stage: test
+  script:
+    # Placeholder public values let the build run; no secrets are needed at build time.
+    - NEXT_PUBLIC_APP_URL=http://localhost:3000 NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321 NEXT_PUBLIC_SUPABASE_ANON_KEY=build-placeholder-anon-key npm run build

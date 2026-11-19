@@ -50,6 +50,7 @@ Migrations in `supabase/migrations/`:
 | `…000100_workflow_functions.sql` | workspace/member RPCs, approval, job enqueue/cancel/retry, `claim_next_job`, `reap_expired_leases`, `check_rate_limit` |
 | `…000200_claim_specific_job.sql` | `claim_job` (run one validation inline through the same job record) |
 | `…000300_multi_cms.sql` | `websites.cms_type` ∈ wordpress/webflow/shopify/custom; matching `cms_connections.connection_type` enforced by trigger; platform cannot change while connected; `retry_job` accepts `CMS_AUTH_FAILED` |
+| `20261119000000_monitoring_indexnow_gate.sql` | `seo_alerts` (one open alert per fingerprint), `api_keys` (hash not readable by clients), `INDEXNOW_SUBMIT` / `SEO_GATE` tasks, Slack / webhook / IndexNow integrations |
 
 All timestamps are UTC. Scheduled times are entered in the website's IANA timezone and converted with DST handling (`lib/scheduling/timezone.ts`).
 
@@ -107,6 +108,60 @@ Pre-publish (each configurable per workspace or website: enabled, severity, thre
 Post-publish: live page accessible (HTTP 200) · indexable (no `noindex`) · published title · published content (sampled passages) · rendered meta title/description/canonical (when confirmed saved).
 
 Checks are labelled *technical check* or *configurable recommendation*. Only `error` severity blocks approval (optionally warnings too). Add a check by implementing `SeoCheck` and calling `registerCheck`.
+
+## SEO automation (AI, technical, programmatic, analytics)
+
+All of this runs as background **tasks** (`automation_tasks`, separate from the publishing queue) that the worker claims with `SKIP LOCKED` and leases. They are either read-only towards external services or idempotent, so a failed or interrupted task can be retried safely. **Nothing here publishes on its own:** generated and template pages are drafts that go through validation and human approval like any other article.
+
+| Feature | Where | What it does |
+| --- | --- | --- |
+| AI content pipeline | *AI studio* | Three Claude calls: **brief** (intent, outline, questions, entities), then **draft** (answer-first Markdown, FAQ, meta title/description, links to your published pages), then **quality review** (scores, claims a human must verify, issues). Saved as a draft flagged "AI draft", with the report on the article page. Tokens per step are recorded in `ai_runs`. |
+| Keyword research & clustering | *Keywords* | Paste lists or import Search Console queries automatically on each sync. Intent is classified by rules. Clustering uses shared Google top-10 URLs when rank checks have run, otherwise word similarity. Any cluster can be turned into an AI draft. |
+| Rank & AI Overview tracking | *Keywords*, autopilot | Uses DataForSEO for search volume, live Google position, top-10 URLs and whether a Google AI Overview cites the site. |
+| AI visibility | Article page, *Keywords*, autopilot | **Readiness score** (validation check `ai_visibility`, a warning below 60 by default): answer up front, question headings, FAQ, lists/tables, specific facts, external citations, short paragraphs, structured data, depth. **Citation checks:** Claude answers the query with live web search, and the app records whether your domain is cited or mentioned. Google AI Overview citations come from DataForSEO. ChatGPT and Perplexity are not queried directly. |
+| Internal linking | Article page | Suggests unlinked phrases matching your published articles, mapped cluster URLs and pages from the latest audit, ranked by TF-IDF similarity. "Add link" inserts the link into the body outside headings, code and existing links, which withdraws approval as with any edit. |
+| JSON-LD generator | Article page | Article/BlogPosting, FAQPage and HowTo (both extracted from the visible article), BreadcrumbList, Organization, LocalBusiness and Product, with required-property validation. Stored on the article, with a copy button for the `<script>`. It is **not** injected into the CMS automatically. |
+| Technical audits | *Site audits*, autopilot | Crawls the site breadth-first (same host, robots.txt respected, polite spacing, up to 500 pages). Covers status codes, redirects, broken internal links, titles, descriptions, H1, thin content, noindex, canonicals, alt text, mixed content, JSON-LD validity, orphan pages, sitemap coverage and click depth. Site-level checks cover robots.txt, sitemaps, llms.txt and per-agent access for GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended and others. Core Web Vitals come from PageSpeed Insights when connected. Indexation comes from Search Console URL Inspection for the 10 most-linked pages when connected. **Export** from the report: a client-ready PDF report, pages (CSV), issues as a fix list sorted by severity (CSV), or the full report (JSON) via `/api/audits/<id>/export?format=pdf|pages|issues|json`. |
+| Programmatic pages | *Page templates* | A template with `{{column}}`, filters (`|title`, `|slug`…) and `{{#if}}` blocks, plus a CSV/JSON feed of up to 500 rows. The preview flags missing columns, duplicate or existing slugs, and thin pages where less than 25% of the body comes from the row's own data. Each valid row then becomes a draft. |
+| Analytics | *Analytics* | Search Console clicks, impressions, CTR and position (daily, query × page); GA4 organic landing pages; Clarity rage/dead clicks and scroll depth; Similarweb monthly visits. Opportunities are detected automatically: striking distance (positions 8–20), low CTR versus position, cannibalization, and content decay (−30% over 28 days). CSV export is included. |
+| SEO agent | *SEO agent* | Claude tool-use loop (SDK tool runner). Eight tools: site overview, Search Console, opportunity detection, audit issues, keywords, content, live page inspection, `propose_action`. It **only files proposals**. An owner or admin approves them: approval queues an AI draft, applies a meta rewrite or link to a tracked article, or adds a to-do. Each run is limited to 20 steps and 15 proposals, scoped to one website, and stores every tool call. |
+| Crawl budget & logs | *Crawl budget & logs* | Upload Apache/Nginx logs (plain or `.gz`, up to 200 MB). Shows Googlebot requests by section, status and day, crawl waste (redirects, errors, parameter URLs), the most-crawled parameters, indexable pages never crawled, and AI-bot activity. The audit adds parameter-URL, sitemap-hygiene and **hreflang** checks. |
+| Content QA at scale | *Content QA* | LLM rubric plus deterministic signals. The verdict comes from fixed thresholds in code; unchanged content is skipped. |
+| Impact | *Analytics* | Search Console clicks and position compared 28 days before and after each publish or applied proposal. |
+| Warehouse export | *Integrations & autopilot* | Databricks SQL Statement Execution API: idempotent loads into Delta tables, all values sent as parameters. |
+| Monitoring & alerts | *Monitoring & alerts* | Each audit is compared with the previous one: pages that broke, redirect or became noindex; canonical, title, description, H1, structured-data and content changes; new error-level issues; robots.txt, sitemap and AI-crawler changes; score drops. Each Search Console sync checks the last 7 days against the 28 before (site clicks with a z-score test, page clicks, ranking drops). Alerts carry before/after evidence, are de-duplicated by fingerprint, and **close themselves** when a later check finds the problem fixed. New alerts go to **Slack** (incoming webhook) and/or a **signed webhook** (`X-SEOHub-Signature: sha256=HMAC(secret, timestamp.body)`), filtered by severity. |
+| IndexNow | *Monitoring & alerts*, *Integrations* | After every verified publish, and for pages an audit finds changed, URLs are submitted to IndexNow (Bing, Yandex, Seznam, Naver). Google does not use IndexNow. The key file is verified on the site when connecting; URLs can also be submitted by hand. |
+| SEO deploy gate (CI/CD) | *API & CI/CD* | `POST /api/v1/gate` with an API key (only a SHA-256 hash is stored) fetches key pages on the live site or a preview URL and compares them with each page's **last known-good** state across the last 5 audits: status, noindex, canonical, title, description, H1, JSON-LD and hreflang. `scripts/seo-gate.mjs` (no dependencies) runs it from GitHub Actions or GitLab CI and exits 1 when the gate fails. A failed gate opens a critical alert; a later passing run closes it. |
+| Autopilot | *Integrations & autopilot* | Daily/weekly/monthly schedules for analytics sync, audits, rank checks and AI-visibility checks (`enqueue_due_schedules()`, run by the worker and the cron route). |
+
+**Configuration.** Set `ANTHROPIC_API_KEY` (server-only) for the AI features. The model defaults to `claude-opus-5-5` (override with `ANTHROPIC_MODEL`), with the server-side refusal fallback enabled. Integrations are connected per website in the UI:
+- **Search Console and GA4** use a Google service-account JSON key; add the account's email to the property.
+- **Clarity, DataForSEO, Similarweb and PageSpeed** use API keys.
+
+Credentials are tested against the provider before being stored with AES-256-GCM (associated data `integration:<org>:<website>:<provider>`), and are readable only by the service role.
+
+**More sources.** Mixpanel conversions by landing page, using a service account, are stored as `traffic_daily` source `mixpanel`. DataForSEO rank checks can cover up to 5 extra markets (`UK:2826:en, DE:2276:de`).
+
+**Python toolkit** (`python/`): `pip install -e python` provides two commands:
+- `seo-toolkit logs access.log.gz --verify-dns --sitemap-urls urls.txt` analyzes multi-GB logs and verifies Googlebot by reverse and forward DNS.
+- `seo-toolkit opportunities --website <id>` exports a CSV from Postgres (needs `[db]` and `DATABASE_URL`).
+
+**CI:** `.gitlab-ci.yml` and `.github/workflows/ci.yml` run lint, typecheck, tests, Python tests and the production build.
+
+[docs/CAPABILITIES.md](docs/CAPABILITIES.md) maps these features to typical SEO-automation requirements.
+
+**SQL / BI.** Synced data lives in `search_performance_daily`, `traffic_daily`, `keywords`, `ai_visibility_checks` and the `v_page_performance` view (RLS applies). Connect any SQL client or BI tool to Postgres, or use the CSV export at `/api/analytics/export`.
+
+**Serverless note.** The cron route gives tasks about 20 s per invocation, so crawls stop early and are marked *partial*. Run `npm run worker` on an always-on host for full audits, large syncs and AI generation (1–3 minutes per article).
+
+**Development mocks.** `npm run mock:analytics` (started by `npm run dev:all`) serves the following, all clearly labelled and refused when `APP_ENV=production`:
+- synthetic Google (token endpoint with real JWT signature checks, Search Console, URL Inspection, GA4, PageSpeed), Clarity, DataForSEO and Similarweb APIs on `:8791`;
+- a demo site with deliberate SEO issues on `:8792`;
+- `LLM_PROVIDER=mock` for sample AI output that is labelled as such.
+
+To try it, add a website `http://localhost:8792` and connect integrations with the values in `.env.local`. The Google key file is `dev/.mock-google-service-account.json` and the GA4 property is `123456789`.
+
+**Not verified here.** No call has been made with real credentials to Anthropic, Google, Clarity, DataForSEO, Similarweb or PageSpeed. The clients follow each vendor's public API documentation and were tested against the mocks above. In particular, Similarweb's `api-key` header authentication and Clarity's response field names should be confirmed against a real account.
 
 ## Background jobs
 
@@ -212,7 +267,7 @@ npm run build
 
 ## Environment variables
 
-See `.env.example`. Public (embedded in the browser bundle): `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Server-only secrets: `SUPABASE_SERVICE_ROLE_KEY`, `CREDENTIAL_ENCRYPTION_KEY` (+ `_ID`, `_PREVIOUS_KEYS`), `CRON_SECRET`, and optionally `SAPLING_API_KEY` (with `AI_DETECTION_PROVIDER=sapling`). Missing configuration shows a setup page (`/setup`) listing variable names only; `/api/health` reports whether configuration is complete.
+See `.env.example`. Public (embedded in the browser bundle): `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Server-only secrets: `SUPABASE_SERVICE_ROLE_KEY`, `CREDENTIAL_ENCRYPTION_KEY` (+ `_ID`, `_PREVIOUS_KEYS`), `CRON_SECRET`, `ANTHROPIC_API_KEY` (AI pipelines; optional `ANTHROPIC_MODEL`), and optionally `SAPLING_API_KEY` (with `AI_DETECTION_PROVIDER=sapling`). Analytics provider credentials are entered in the UI and stored encrypted, not in environment variables. Missing configuration shows a setup page (`/setup`) listing variable names only; `/api/health` reports whether configuration is complete.
 
 Generate an encryption key:
 
@@ -224,11 +279,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 1. Create a Supabase project. Apply migrations: `npx supabase link --project-ref <ref>` then `npx supabase db push`.
 2. Supabase Auth: set *Site URL* to your app URL, add `https://<app>/auth/confirm` to redirect URLs, configure SMTP for confirmation emails, and set the confirmation email template link to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`.
-3. Vercel: import the repo, set all variables from `.env.example` with `APP_ENV=production` and `ALLOW_PRIVATE_NETWORK_TARGETS` unset. Do **not** set mock/demo variables (`MOCK_*`, `DEMO_USER_PASSWORD`, `WEBFLOW_API_BASE_URL`, `SHOPIFY_ADMIN_BASE_URL`).
+3. Vercel: import the repo, set all variables from `.env.example` with `APP_ENV=production` and `ALLOW_PRIVATE_NETWORK_TARGETS` unset. Do **not** set mock/demo variables (`MOCK_*`, `DEMO_USER_PASSWORD`, `WEBFLOW_API_BASE_URL`, `SHOPIFY_ADMIN_BASE_URL`, `ANALYTICS_API_BASE_URL`, `LLM_PROVIDER=mock`).
 4. Jobs: `vercel.json` calls the cron route every minute. **Vercel Hobby only allows daily cron jobs** — on Hobby, use an external scheduler hitting `/api/cron/process-jobs` with the bearer secret, or run `npm run worker` on a small always-on host. Function duration limits cap each batch (`maxDuration = 60`).
 5. Smoke test: `/api/health` returns `{"ok":true}`. Sign up, connect a staging site on each platform you use, and publish one article.
 
-Never run `npm run seed:dev`, `npm run mock:wp` or `npm run mock:cms` in production (all three refuse to).
+Never run `npm run seed:dev`, `npm run mock:wp`, `npm run mock:cms` or `npm run mock:analytics` in production (all refuse to).
 
 ## Known limitations
 
@@ -240,7 +295,11 @@ Never run `npm run seed:dev`, `npm run mock:wp` or `npm run mock:cms` in product
 - Categories/tags/featured image use existing WordPress IDs; term lookup/creation and media upload are not implemented.
 - Posts only (`/wp/v2/posts`); custom post types and WordPress pages are not supported.
 - Scheduling is done by this app's queue (publishes at the time); WordPress-native `future` scheduling exists in the adapter but is not used by the workflow.
-- Internal-link checks follow at most 20 links per article; JSON-LD is syntax-checked only (no schema.org validation).
+- Internal-link checks follow at most 20 links per article. The pre-publish JSON-LD check validates syntax only; the schema generator checks required properties for the types it produces.
+- Generated JSON-LD is not inserted into the CMS. Add it through your theme or SEO plugin.
+- AI visibility is measured on Claude (web search) and Google AI Overviews (via DataForSEO). ChatGPT, Perplexity and Gemini are not queried. Citations vary between runs, so treat them as a trend.
+- Keyword difficulty is DataForSEO's Google Ads competition index, not an organic difficulty score. Keyword clustering and intent are heuristics.
+- The crawler does not render JavaScript. Client-side rendered sites will appear thin.
 - Duplicate-title/slug checks only see content tracked in this app (plus WordPress slug reconciliation at publish time).
 - Observability is structured JSON logs (`metric.*` events) — no dashboards or alerting are configured.
 - Rich text is Markdown or HTML in a textarea with a sanitized preview; no WYSIWYG editor.

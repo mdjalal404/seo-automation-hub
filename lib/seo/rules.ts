@@ -31,6 +31,7 @@ export const rulesSchema = z.object({
       canonical_url: checkRule({}),
       keyword_usage: checkRule({}),
       ai_content: checkRule({ maxAiPercent: z.number().int().min(1).max(100) }),
+      ai_visibility: checkRule({ minScore: z.number().int().min(1).max(100) }),
     })
     .partial(),
   publishing: z
@@ -68,6 +69,7 @@ export const DEFAULT_RULES: ResolvedRules = {
     canonical_url: { enabled: true, severity: "error" },
     keyword_usage: { enabled: true, severity: "info" },
     ai_content: { enabled: true, severity: "warning", maxAiPercent: 40 },
+    ai_visibility: { enabled: true, severity: "warning", minScore: 60 },
   },
   publishing: { blockOnWarnings: false, verifyAfterPublish: true },
 };

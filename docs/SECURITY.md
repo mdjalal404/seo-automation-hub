@@ -28,6 +28,10 @@
 
 - AI-content detection: by default it runs locally and article text never leaves the app. If the optional Sapling provider is enabled, article text is sent to Sapling during validation. Treat this as a data-processing decision for each client. `SAPLING_API_KEY` is server-only, is sent only in the request body to `api.sapling.ai`, and is never logged.
 
+- SEO integrations (Search Console, GA4, Clarity, DataForSEO, Similarweb, PageSpeed): credentials are verified before storage, encrypted with associated data `integration:<org>:<website>:<provider>`, and the ciphertext column is not granted to `authenticated`. Google access uses read-only scopes (`webmasters.readonly`, `analytics.readonly`) through a service-account JWT signed in memory. Endpoint overrides (`ANALYTICS_API_BASE_URL`) and `LLM_PROVIDER=mock` are ignored in production.
+- AI pipelines send the topic, keywords, brand notes, article text and your published page titles/URLs to Anthropic (`ANTHROPIC_API_KEY`, server-only). AI visibility checks send only the query. Treat this as a data-processing decision per client. Model output is stored as a draft and is never published without validation and approval.
+- The crawler and all provider calls use the SSRF-hardened fetch (connect-time IP checks, timeouts, size limits). The crawler stays on the website's host and respects robots.txt.
+
 ## Publishing safety
 - Content state machine enforced by a database trigger (`content_transition_allowed`); validation failure can never transition to publishing.
 - Approval is bound to a content hash; any material edit withdraws it (DB trigger). Content is locked while a publish job is active.
