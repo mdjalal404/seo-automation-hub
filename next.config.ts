@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["undici", "pdfkit"], // pdfkit reads its font metrics from disk at runtime
   experimental: {
     serverActions: { bodySizeLimit: "4mb" },
+    agentUpgrade: "security", // set by `next upgrade --agent=security`
   },
   turbopack: {
     rules: {
